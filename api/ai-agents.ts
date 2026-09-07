@@ -17,13 +17,13 @@ type AgentResult = {
 
 const AGENTS: Array<{ name: AgentName; mission: string }> = [
   { name: 'TECHNICAL', mission: 'Avalie tendência, EMAs, RSI, ATR, estrutura, volume e contexto multi-timeframe.' },
-  { name: 'SMC', mission: 'Avalie estrutura SMC: BOS, CHoCH, liquidez, sweep, FVG, order blocks e deslocamento.' },
-  { name: 'WYCKOFF_GANN', mission: 'Procure fases Wyckoff, causa/efeito, spring/upthrust e confluências de ciclos/níveis Gann. Não invente níveis que não estejam nos dados.' },
-  { name: 'DIVERGENCE', mission: 'Avalie divergências e confirmações entre preço, RSI, volume e momentum. Diferencie divergência regular de hidden quando os dados permitirem.' },
+  { name: 'SMC', mission: 'Avalie BOS, CHoCH, liquidez, sweep, FVG, order blocks, premium/discount e deslocamento.' },
+  { name: 'WYCKOFF_GANN', mission: 'Procure contexto Wyckoff e confluências de ciclos/níveis Gann somente quando sustentados pelos dados. Não invente níveis.' },
+  { name: 'DIVERGENCE', mission: 'Avalie divergências entre preço, RSI, volume e momentum. Diferencie regular e hidden quando os dados permitirem.' },
 ];
 
 function promptFor(agent: typeof AGENTS[number], symbol: string, market: unknown) {
-  return `Você é o agente ${agent.name} do BotTrade. Sua missão: ${agent.mission}\n\nAtivo: ${symbol}\nDados objetivos disponíveis:\n${JSON.stringify(market)}\n\nRegras:\n- Não invente dados, preços, notícias ou indicadores ausentes.\n- Não execute ordens e não forneça instruções de alavancagem.\n- Trabalhe apenas como analista de mercado.\n- Retorne os campos solicitados de forma objetiva.\n- confidence deve ser número de 0 a 100.`;
+  return `Você é o agente ${agent.name} do BotTrade. Sua missão: ${agent.mission}\n\nAtivo: ${symbol}\nDados objetivos disponíveis:\n${JSON.stringify(market)}\n\nRegras obrigatórias:\n- Não invente dados, preços, notícias ou indicadores ausentes.\n- Não execute ordens e não forneça instruções de alavancagem.\n- Se os dados forem insuficientes, use NEUTRO e confidence 0.\n- Trabalhe apenas como analista de mercado.\n- Retorne somente os campos do schema.\n- confidence deve ser número de 0 a 100.`;
 }
 
 function normalizeAgent(parsed: Omit<AgentResult, 'agent' | 'model'>): Omit<AgentResult, 'agent' | 'model'> {
@@ -46,11 +46,7 @@ async function runAgent(agent: typeof AGENTS[number], symbol: string, market: un
     const result = await callGroq([
       { role: 'system', content: 'Você é um analista quantitativo disciplinado. Seja objetivo, conservador e baseado somente nos dados fornecidos.' },
       { role: 'user', content: promptFor(agent, symbol, market) },
-    ], {
-      model,
-      temperature: 0.1,
-      maxTokens: 450,
-    });
+    ], { model, temperature: 0.1, maxTokens: 450 });
     const parsed = normalizeAgent(parseJson<Omit<AgentResult, 'agent' | 'model'>>(result.content));
     return { agent: agent.name, ...parsed, model: result.model };
   } catch (error) {
@@ -68,7 +64,6 @@ async function runAgent(agent: typeof AGENTS[number], symbol: string, market: un
 }
 
 async function runAgentsWithLimit(symbol: string, market: unknown): Promise<AgentResult[]> {
-  // Duas chamadas simultâneas evitam picos desnecessários e deixam margem no plano gratuito.
   const results: AgentResult[] = [];
   for (let i = 0; i < AGENTS.length; i += 2) {
     const batch = AGENTS.slice(i, i + 2);
@@ -91,9 +86,9 @@ function directional(value: unknown): number {
 }
 
 function masterScore(results: AgentResult[], market: any) {
-  const valid = results.filter(r => !r.error && r.confidence > 0);
-  const agentRaw = valid.reduce((sum, r) => sum + (r.decision === 'LONG' ? r.confidence : r.decision === 'SHORT' ? -r.confidence : 0), 0);
-  const agentScore = valid.length ? Math.round(agentRaw / valid.length) : 0;
+  const valid = results.filter(r => !r.error && r.confidence > 0 && (r.decision === 'LONG' || r.decision === 'SHORT'));
+  const agentRaw = valid.reduce((sum, r) => sum + (r.decision === 'LONG' ? r.confidence : -r.confidence), 0);
+  const directionalAgentScore = valid.length ? agentRaw / valid.length : 0;
 
   const setup = market?.setup;
   const setupSide = setup?.side as Decision | undefined;
@@ -109,25 +104,25 @@ function masterScore(results: AgentResult[], market: any) {
   const smcFrames = market?.smc?.timeframes ? Object.values(market.smc.timeframes) as any[] : [];
   const smcBiasValues = smcFrames.map(x => directional(x?.bias)).filter(Boolean);
   const smcBias = smcBiasValues.length ? smcBiasValues.reduce((a, b) => a + b, 0) / smcBiasValues.length : 0;
-
   const objectiveBonus = Math.max(-10, Math.min(10, technicalBias * 5 + smcBias * 5));
-  const rawMaster = agentScore * 0.65 + setupContribution + pillarBias + objectiveBonus;
-  const score = Math.round(Math.max(-100, Math.min(100, rawMaster)));
-  const decision: Decision = score >= 35 ? 'LONG' : score <= -35 ? 'SHORT' : 'NEUTRO';
-  const aligned = valid.filter(r => r.decision === decision).length;
-  const agreement = valid.length >= 3 ? Math.round((aligned / valid.length) * 100) : 0;
 
-  const quality = valid.length < 3 ? 'DADOS_INSUFICIENTES' : Math.abs(score) >= 70 && agreement >= 75 ? 'A+' : Math.abs(score) >= 50 && agreement >= 60 ? 'A' : Math.abs(score) >= 35 && agreement >= 50 ? 'B' : 'C';
-  const trigger = decision === 'NEUTRO' ? 'AGUARDAR CONFLUÊNCIA' : agreement >= 75 && Math.abs(score) >= 60 ? 'AGUARDAR GATILHO' : 'AGUARDAR CONFIRMAÇÃO';
+  const directionalRaw = directionalAgentScore * 0.65 + setupContribution + pillarBias + objectiveBonus;
+  const score = Math.round(Math.max(0, Math.min(100, Math.abs(directionalRaw))));
+  const decision: Decision = valid.length >= 3 && directionalRaw >= 35 ? 'LONG' : valid.length >= 3 && directionalRaw <= -35 ? 'SHORT' : 'NEUTRO';
+  const aligned = valid.filter(r => r.decision === decision).length;
+  const agreement = valid.length >= 3 && decision !== 'NEUTRO' ? Math.round((aligned / valid.length) * 100) : 0;
+  const quality = valid.length < 3 ? 'DADOS_INSUFICIENTES' : score >= 70 && agreement >= 75 ? 'A+' : score >= 50 && agreement >= 60 ? 'A' : score >= 35 && agreement >= 50 ? 'B' : 'C';
+  const trigger = decision === 'NEUTRO' ? 'AGUARDAR CONFLUÊNCIA' : agreement >= 75 && score >= 60 ? 'AGUARDAR GATILHO' : 'AGUARDAR CONFIRMAÇÃO';
+  const confidence = valid.length >= 3 ? Math.min(100, Math.round(score * 0.8 + agreement * 0.2)) : 0;
 
   return {
     score,
     decision,
-    confidence: valid.length >= 3 ? Math.min(100, Math.round(Math.abs(score) * 0.8 + agreement * 0.2)) : 0,
+    confidence,
     agreement,
     quality,
     trigger,
-    components: { agentScore, setupContribution: Math.round(setupContribution), pillarBias: Math.round(pillarBias), objectiveBonus: Math.round(objectiveBonus) },
+    components: { agentScore: Math.round(directionalAgentScore), setupContribution: Math.round(setupContribution), pillarBias: Math.round(pillarBias), objectiveBonus: Math.round(objectiveBonus) },
   };
 }
 
@@ -151,7 +146,7 @@ export async function POST(req: Request) {
         agentsUsed: results.filter(r => !r.error && r.confidence > 0).length,
         status: master.quality === 'DADOS_INSUFICIENTES' ? 'DADOS_INSUFICIENTES' : 'CONFLUENCIA_MESTRE',
         executionAllowed: false,
-        note: 'Groq Free + Structured Outputs. Score Mestre é analítico; Risk Engine e execução continuam separados e bloqueados.',
+        note: 'Score Mestre 0-100. São necessários 3+ agentes válidos, qualidade A/A+, consenso >=60% e validação independente do Risk Engine. Execução real permanece bloqueada.',
       },
     }), { headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
   } catch (error) {
