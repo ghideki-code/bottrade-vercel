@@ -1,6 +1,6 @@
-import type { Candle } from '../types';
-import { analyzeSMC } from './smcAnalysis';
-import { analyzeConfluence } from './confluenceEngine';
+import type { Candle } from '../types.js';
+import { analyzeSMC } from './smcAnalysis.js';
+import { analyzeConfluence } from './confluenceEngine.js';
 export type SetupSide='LONG'|'SHORT'|'WAIT';
 export interface ScalpSetup{side:SetupSide;score:number;confluence:number;entry:number;stop:number;tp1:number;tp2:number;tp3:number;riskReward:number;timeframe:string;confirmations:string[];invalidations:string[];}
 const atr=(c:Candle[],n=14)=>{const x=c.slice(-(n+1));if(x.length<2)return 0;let s=0;for(let i=1;i<x.length;i++)s+=Math.max(x[i].high-x[i].low,Math.abs(x[i].high-x[i-1].close),Math.abs(x[i].low-x[i-1].close));return s/(x.length-1)};
