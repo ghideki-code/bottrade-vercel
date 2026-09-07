@@ -1,5 +1,5 @@
-import type { Candle } from '../types';
-import { detectScalpSetup } from './setupEngine';
+import type { Candle } from '../types.js';
+import { detectScalpSetup } from './setupEngine.js';
 export type BacktestTrade={index:number;side:'LONG'|'SHORT';entry:number;stop:number;tp1:number;tp2:number;tp3:number;exit:number;pnlR:number;bars:number;result:'WIN'|'LOSS'|'TIMEOUT';score:number};
 export type BacktestResult={trades:BacktestTrade[];totalTrades:number;wins:number;losses:number;winRate:number;profitFactor:number;netR:number;maxDrawdownR:number;averageR:number};
 const H1=60*60*1000,H4=4*H1;
