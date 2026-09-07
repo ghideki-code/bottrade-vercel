@@ -1,5 +1,5 @@
-import { detectScalpSetup } from '../src/utils/setupEngine';
-import type { Candle } from '../src/types';
+import { detectScalpSetup } from '../src/utils/setupEngine.js';
+import type { Candle } from '../src/types.js';
 
 type Row = [number,string,string,string,string,string];
 async function load(symbol:string, interval:string):Promise<Candle[]> {
@@ -7,9 +7,9 @@ async function load(symbol:string, interval:string):Promise<Candle[]> {
   if(!r.ok) throw new Error(`Binance ${r.status}`);
   return (await r.json() as Row[]).map(x=>({timestamp:x[0],open:+x[1],high:+x[2],low:+x[3],close:+x[4],volume:+x[5]}));
 }
-export default async function handler(req:Request){
+export async function GET(req:Request){
   try{
-    const u=new URL(req.url);
+    const u=new URL(req.url,'https://bottrade-vercel.local');
     const symbols=String(u.searchParams.get('symbols')||'BTCUSDT').split(',').map(x=>x.trim().toUpperCase().replace('/','')).filter(Boolean).slice(0,20);
     const results=await Promise.all(symbols.map(async symbol=>{
       try{
