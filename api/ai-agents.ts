@@ -42,13 +42,15 @@ function normalizeAgent(parsed: Omit<AgentResult, 'agent' | 'model'>): Omit<Agen
 
 async function runAgent(agent: typeof AGENTS[number], symbol: string, market: unknown): Promise<AgentResult> {
   try {
+    const configuredModel = process.env[`OPENROUTER_MODEL_${agent.name}`] || process.env.OPENROUTER_MODEL;
+    const model = process.env.OPENROUTER_ALLOW_PAID === 'true' && configuredModel ? configuredModel : 'openrouter/free';
     const result = await callOpenRouter([
       { role: 'system', content: 'Você é um analista quantitativo disciplinado. Seja objetivo e conservador.' },
       { role: 'user', content: promptFor(agent, symbol, market) },
     ], {
-      model: process.env[`OPENROUTER_MODEL_${agent.name}`] || process.env.OPENROUTER_MODEL,
+      model,
       temperature: 0.1,
-      maxTokens: 650,
+      maxTokens: 450,
     });
     const parsed = normalizeAgent(parseJson<Omit<AgentResult, 'agent' | 'model'>>(result.content));
     return { agent: agent.name, ...parsed, model: result.model };
@@ -64,6 +66,18 @@ async function runAgent(agent: typeof AGENTS[number], symbol: string, market: un
       error: 'AGENT_UNAVAILABLE',
     };
   }
+}
+
+async function runAgentsWithLimit(symbol: string, market: unknown): Promise<AgentResult[]> {
+  // O plano gratuito pode rejeitar várias requisições simultâneas por orçamento in-flight.
+  // Duas chamadas por vez preservam o comitê de 4 especialistas sem o pico de concorrência anterior.
+  const results: AgentResult[] = [];
+  for (let i = 0; i < AGENTS.length; i += 2) {
+    const batch = AGENTS.slice(i, i + 2);
+    const batchResults = await Promise.all(batch.map(agent => runAgent(agent, symbol, market)));
+    results.push(...batchResults);
+  }
+  return results;
 }
 
 function numeric(value: unknown): number | null {
@@ -103,7 +117,8 @@ function masterScore(results: AgentResult[], market: any) {
   const score = Math.round(Math.max(-100, Math.min(100, rawMaster)));
   const decision: Decision = score >= 35 ? 'LONG' : score <= -35 ? 'SHORT' : 'NEUTRO';
   const aligned = valid.filter(r => r.decision === decision).length;
-  const agreement = valid.length ? Math.round((aligned / valid.length) * 100) : 0;
+  // Com menos de 3 agentes válidos não existe consenso estatisticamente útil.
+  const agreement = valid.length >= 3 ? Math.round((aligned / valid.length) * 100) : 0;
 
   const quality = valid.length < 3 ? 'DADOS_INSUFICIENTES' : Math.abs(score) >= 70 && agreement >= 75 ? 'A+' : Math.abs(score) >= 50 && agreement >= 60 ? 'A' : Math.abs(score) >= 35 && agreement >= 50 ? 'B' : 'C';
   const trigger = decision === 'NEUTRO' ? 'AGUARDAR CONFLUÊNCIA' : agreement >= 75 && Math.abs(score) >= 60 ? 'AGUARDAR GATILHO' : 'AGUARDAR CONFIRMAÇÃO';
@@ -111,7 +126,7 @@ function masterScore(results: AgentResult[], market: any) {
   return {
     score,
     decision,
-    confidence: Math.min(100, Math.round(Math.abs(score) * 0.8 + agreement * 0.2)),
+    confidence: valid.length >= 3 ? Math.min(100, Math.round(Math.abs(score) * 0.8 + agreement * 0.2)) : 0,
     agreement,
     quality,
     trigger,
@@ -126,7 +141,7 @@ export async function POST(req: Request) {
     const market = body?.market;
     if (!market) return new Response(JSON.stringify({ error: 'Envie o campo market com os dados objetivos da análise.' }), { status: 400, headers: { 'content-type': 'application/json' } });
 
-    const results = await Promise.all(AGENTS.map(agent => runAgent(agent, symbol, market)));
+    const results = await runAgentsWithLimit(symbol, market);
     const master = masterScore(results, market);
     return new Response(JSON.stringify({
       symbol,
@@ -138,7 +153,7 @@ export async function POST(req: Request) {
         agentsUsed: results.filter(r => !r.error && r.confidence > 0).length,
         status: master.quality === 'DADOS_INSUFICIENTES' ? 'DADOS_INSUFICIENTES' : 'CONFLUENCIA_MESTRE',
         executionAllowed: false,
-        note: 'Score Mestre é analítico. Risk Engine e execução continuam separados e bloqueados.',
+        note: 'Plano gratuito: OpenRouter Free Models Router, no máximo duas chamadas simultâneas. Score Mestre é analítico; Risk Engine e execução continuam separados e bloqueados.',
       },
     }), { headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
   } catch (error) {
