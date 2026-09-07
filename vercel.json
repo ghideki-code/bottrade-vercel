@@ -1,8 +1,3 @@
 {
-  "crons": [
-    {
-      "path": "/api/paper-trading-cron",
-      "schedule": "* * * * *"
-    }
-  ]
+  "crons": []
 }
