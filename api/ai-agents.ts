@@ -16,14 +16,56 @@ type AgentResult = {
 };
 
 const AGENTS: Array<{ name: AgentName; mission: string }> = [
-  { name: 'TECHNICAL', mission: 'Avalie tendência, EMAs, RSI, ATR, estrutura, volume e contexto multi-timeframe.' },
-  { name: 'SMC', mission: 'Avalie BOS, CHoCH, liquidez, sweep, FVG, order blocks, premium/discount e deslocamento.' },
-  { name: 'WYCKOFF_GANN', mission: 'Procure contexto Wyckoff e confluências de ciclos/níveis Gann somente quando sustentados pelos dados. Não invente níveis.' },
-  { name: 'DIVERGENCE', mission: 'Avalie divergências entre preço, RSI, volume e momentum. Diferencie regular e hidden quando os dados permitirem.' },
+  {
+    name: 'TECHNICAL',
+    mission: `Você é o especialista em análise técnica e Triple Screen. Analise primeiro o contexto maior e depois desça para a execução. Avalie tendência, estrutura de máximas/mínimas, EMA 9/21/50/200, RSI, MACD quando disponível, ATR, volume, momentum, volatilidade, suportes, resistências, rompimentos e retestes. Procure alinhamento entre 4H, 1H e 15M. Diferencie tendência de ruído. Não use um indicador isolado como gatilho. A entrada precisa estar coerente com estrutura, risco e localização do preço.`,
+  },
+  {
+    name: 'SMC',
+    mission: `Você é o especialista em Smart Money Concepts. Reconstrua a estrutura externa e interna quando os dados permitirem. Avalie BOS, CHoCH, swing highs/lows, buy-side liquidity (BSL), sell-side liquidity (SSL), liquidity sweep, equal highs/lows, displacement, inducement, mitigation, Fair Value Gaps/imbalances, Order Blocks e premium/discount. Procure a sequência liquidez -> deslocamento -> mudança/confirmação de estrutura -> retorno à zona -> continuação/reversão. Um FVG ou Order Block sozinho não é confirmação. Identifique se a zona ainda está ativa ou já foi mitigada.`,
+  },
+  {
+    name: 'WYCKOFF_GANN',
+    mission: `Você é o especialista em Wyckoff e Gann. Em Wyckoff, avalie contexto de acumulação, distribuição, markup, markdown, spring, test, SOS, LPS, upthrust/UTAD, SOW, esforço versus resultado, absorção e clímax. Em Gann, só use relações de preço, tempo, ângulos ou ciclos se houver dados objetivos suficientes para sustentá-las. Nunca invente um ângulo, ciclo ou nível. Use Gann como confluência, nunca como gatilho isolado. Dê mais peso ao comportamento real de preço/volume e à estrutura.`,
+  },
+  {
+    name: 'DIVERGENCE',
+    mission: `Você é o especialista em divergências e momentum. Procure divergência regular bullish/bearish e divergência oculta bullish/bearish entre preço e RSI, MACD, momentum ou outras séries realmente fornecidas. Compare pivôs equivalentes, não pontos aleatórios. Verifique se a divergência está confirmada ou apenas potencial. Considere timeframe e contexto de tendência. Uma divergência isolada não autoriza trade. Avalie também divergência de volume e, quando houver, Open Interest/funding.`,
+  },
 ];
 
 function promptFor(agent: typeof AGENTS[number], symbol: string, market: unknown) {
-  return `Você é o agente ${agent.name} do BotTrade. Sua missão: ${agent.mission}\n\nAtivo: ${symbol}\nDados objetivos disponíveis:\n${JSON.stringify(market)}\n\nRegras obrigatórias:\n- Não invente dados, preços, notícias ou indicadores ausentes.\n- Não execute ordens e não forneça instruções de alavancagem.\n- Se os dados forem insuficientes, use NEUTRO e confidence 0.\n- Trabalhe apenas como analista de mercado.\n- Retorne somente os campos do schema.\n- confidence deve ser número de 0 a 100.`;
+  return `Você é um dos quatro analistas independentes do BotTrade.
+
+ATIVO: ${symbol}
+
+MISSÃO DO AGENTE:
+${agent.mission}
+
+DADOS OBJETIVOS RECEBIDOS:
+${JSON.stringify(market)}
+
+PROTOCOLO DE ANÁLISE:
+1. Use exclusivamente os dados recebidos.
+2. Primeiro identifique o contexto e o timeframe; depois avalie a possível oportunidade.
+3. Procure CONFLUÊNCIA, não uma justificativa única.
+4. Separe fatos observáveis de interpretação.
+5. Não invente candles, preços, indicadores, notícias, volume, liquidez, ciclos, níveis ou padrões que não estejam sustentados pelos dados.
+6. Se um dado necessário não existir, trate-o como desconhecido.
+7. Se a evidência for insuficiente ou contraditória, escolha NEUTRO e confidence 0-49 conforme a gravidade.
+8. LONG ou SHORT só devem ser escolhidos quando existir uma tese direcional objetiva.
+9. Explique a tese de forma curta, técnica e auditável.
+10. keyLevels deve conter somente níveis realmente observáveis ou derivados diretamente dos dados fornecidos.
+11. invalidation deve dizer qual condição de preço/estrutura destrói a tese.
+12. riskFlags deve listar riscos concretos, não frases genéricas.
+13. Não execute ordens, não forneça credenciais e não determine alavancagem.
+14. Você não é o Risk Engine. Não aprove execução sozinho.
+15. Sua função é fornecer uma opinião independente ao Supervisor.
+
+REGRA CRÍTICA:
+Nunca aumente confidence para parecer convincente. Se não houver evidência, reduza a confiança.
+
+RETORNE SOMENTE O JSON DO SCHEMA. SEM MARKDOWN. SEM EXPLICAÇÕES FORA DO JSON.`;
 }
 
 function normalizeAgent(parsed: Omit<AgentResult, 'agent' | 'model'>): Omit<AgentResult, 'agent' | 'model'> {
@@ -44,7 +86,7 @@ async function runAgent(agent: typeof AGENTS[number], symbol: string, market: un
   try {
     const model = process.env[`GROQ_MODEL_${agent.name}`] || process.env.GROQ_MODEL || 'openai/gpt-oss-20b';
     const result = await callGroq([
-      { role: 'system', content: 'Você é um analista quantitativo disciplinado. Seja objetivo, conservador e baseado somente nos dados fornecidos.' },
+      { role: 'system', content: 'Você é um analista quantitativo independente, conservador e auditável. Nunca invente evidências.' },
       { role: 'user', content: promptFor(agent, symbol, market) },
     ], { model, temperature: 0.1, maxTokens: 450 });
     const parsed = normalizeAgent(parseJson<Omit<AgentResult, 'agent' | 'model'>>(result.content));
@@ -80,8 +122,8 @@ function numeric(value: unknown): number | null {
 
 function directional(value: unknown): number {
   const text = String(value || '').toUpperCase();
-  if (text.includes('BULL') || text.includes('LONG') || text.includes('BUY')) return 1;
-  if (text.includes('BEAR') || text.includes('SHORT') || text.includes('SELL')) return -1;
+  if (text.includes('BULL') || text.includes('LONG') || text.includes('BUY') || text.includes('ALTA')) return 1;
+  if (text.includes('BEAR') || text.includes('SHORT') || text.includes('SELL') || text.includes('BAIXA')) return -1;
   return 0;
 }
 
@@ -146,7 +188,7 @@ export async function POST(req: Request) {
         agentsUsed: results.filter(r => !r.error && r.confidence > 0).length,
         status: master.quality === 'DADOS_INSUFICIENTES' ? 'DADOS_INSUFICIENTES' : 'CONFLUENCIA_MESTRE',
         executionAllowed: false,
-        note: 'Score Mestre 0-100. São necessários 3+ agentes válidos, qualidade A/A+, consenso >=60% e validação independente do Risk Engine. Execução real permanece bloqueada.',
+        note: 'Os 4 especialistas são independentes. O Supervisor exige 3+ agentes válidos, qualidade A/A+, consenso >=60% e validação independente do Risk Engine. Execução real permanece bloqueada.',
       },
     }), { headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
   } catch (error) {
