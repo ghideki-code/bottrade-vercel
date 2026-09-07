@@ -1,0 +1,51 @@
+import { analyzeSMC } from '../src/utils/smcAnalysis';
+import type { Candle } from '../src/types';
+
+type Setup = {
+  symbol: string; interval: string; direction: 'LONG' | 'SHORT' | 'WAIT'; score: number;
+  entryLow: number; entryHigh: number; stop: number; tp1: number; tp2: number; tp3: number;
+  riskReward: number; confirmations: string[]; invalidations: string[];
+};
+
+async function candles(symbol: string, interval: string): Promise<Candle[]> {
+  const r = await fetch(`https://fapi.binance.com/fapi/v1/klines?symbol=${encodeURIComponent(symbol)}&interval=${interval}&limit=200`);
+  if (!r.ok) throw new Error(`Binance ${r.status}`);
+  const rows = await r.json() as Array<[number,string,string,string,string,string]>;
+  return rows.map(x => ({ timestamp:x[0], open:+x[1], high:+x[2], low:+x[3], close:+x[4], volume:+x[5] }));
+}
+
+function detect(symbol:string, c:Candle[], h:Candle[]): Setup {
+  const s=analyzeSMC(c), sh=analyzeSMC(h), last=c.at(-1)!;
+  const atr=c.slice(-15).reduce((sum,x)=>sum+(x.high-x.low),0)/15;
+  const confirmations:string[]=[]; const invalidations:string[]=[];
+  let long=0, short=0;
+  if(s.bias==='BULLISH'){long+=22;confirmations.push('SMC bullish');}
+  if(s.bias==='BEARISH'){short+=22;confirmations.push('SMC bearish');}
+  if(sh.bias==='BULLISH'){long+=20;confirmations.push('4H bullish');}
+  if(sh.bias==='BEARISH'){short+=20;confirmations.push('4H bearish');}
+  if(s.sweep==='SSL'){long+=14;confirmations.push('SSL sweep');}
+  if(s.sweep==='BSL'){short+=14;confirmations.push('BSL sweep');}
+  if(s.fvg&&!s.fvg.filled){if(s.fvg.type==='BULLISH'){long+=10;confirmations.push('FVG bullish ativo');}else{short+=10;confirmations.push('FVG bearish ativo');}}
+  if(s.premiumDiscount==='DISCOUNT') long+=8;
+  if(s.premiumDiscount==='PREMIUM') short+=8;
+  const direction=long>=short+12?'LONG':short>=long+12?'SHORT':'WAIT';
+  const score=Math.max(long,short);
+  const entryLow=direction==='LONG'?Math.min(last.close,last.low):direction==='SHORT'?Math.max(last.close,last.high):last.close;
+  const entryHigh=direction==='LONG'?Math.max(last.close,last.high):direction==='SHORT'?Math.min(last.close,last.low):last.close;
+  const stop=direction==='LONG'?entryLow-1.2*atr:direction==='SHORT'?entryHigh+1.2*atr:last.close;
+  const risk=direction==='LONG'?entryHigh-stop:direction==='SHORT'?stop-entryLow:0;
+  const tp1=direction==='LONG'?entryHigh+risk:direction==='SHORT'?entryLow-risk:last.close;
+  const tp2=direction==='LONG'?entryHigh+2*risk:direction==='SHORT'?entryLow-2*risk:last.close;
+  const tp3=direction==='LONG'?entryHigh+3*risk:direction==='SHORT'?entryLow-3*risk:last.close;
+  if(direction==='LONG') invalidations.push(`Fechamento abaixo de ${stop.toPrecision(6)}`);
+  if(direction==='SHORT') invalidations.push(`Fechamento acima de ${stop.toPrecision(6)}`);
+  return {symbol,interval:'15m',direction,score:Math.min(100,score),entryLow,entryHigh,stop,tp1,tp2,tp3,riskReward:3,confirmations,invalidations};
+}
+
+export default async function handler(req: Request){
+  try{
+    const u=new URL(req.url); const symbol=String(u.searchParams.get('symbol')||'BTCUSDT').toUpperCase().replace('/','');
+    const [c,h]=await Promise.all([candles(symbol,'15m'),candles(symbol,'4h')]);
+    return new Response(JSON.stringify({setup:detect(symbol,c,h),source:'Binance USDⓈ-M Futures • Setup Engine'}),{headers:{'content-type':'application/json','cache-control':'s-maxage=15, stale-while-revalidate=45'}});
+  }catch(e){return new Response(JSON.stringify({error:e instanceof Error?e.message:'Setup unavailable'}),{status:502,headers:{'content-type':'application/json'}});}
+}
