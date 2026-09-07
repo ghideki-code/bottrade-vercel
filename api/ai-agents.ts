@@ -1,4 +1,4 @@
-import { callOpenRouter, parseJson } from './_lib/openrouter.js';
+import { callGroq, parseJson } from './_lib/groq.js';
 
 type AgentName = 'TECHNICAL' | 'SMC' | 'WYCKOFF_GANN' | 'DIVERGENCE';
 type Decision = 'LONG' | 'SHORT' | 'NEUTRO';
@@ -23,7 +23,7 @@ const AGENTS: Array<{ name: AgentName; mission: string }> = [
 ];
 
 function promptFor(agent: typeof AGENTS[number], symbol: string, market: unknown) {
-  return `Você é o agente ${agent.name} do BotTrade. Sua missão: ${agent.mission}\n\nAtivo: ${symbol}\nDados objetivos disponíveis:\n${JSON.stringify(market)}\n\nRegras:\n- Não invente dados, preços, notícias ou indicadores ausentes.\n- Não execute ordens e não forneça instruções de alavancagem.\n- Trabalhe apenas como analista de mercado.\n- Retorne SOMENTE JSON válido.\n- confidence deve ser número de 0 a 100.\n\nFormato:\n{"decision":"LONG|SHORT|NEUTRO","confidence":0,"thesis":"","keyLevels":[""],"invalidation":"","riskFlags":[""]}`;
+  return `Você é o agente ${agent.name} do BotTrade. Sua missão: ${agent.mission}\n\nAtivo: ${symbol}\nDados objetivos disponíveis:\n${JSON.stringify(market)}\n\nRegras:\n- Não invente dados, preços, notícias ou indicadores ausentes.\n- Não execute ordens e não forneça instruções de alavancagem.\n- Trabalhe apenas como analista de mercado.\n- Retorne os campos solicitados de forma objetiva.\n- confidence deve ser número de 0 a 100.`;
 }
 
 function normalizeAgent(parsed: Omit<AgentResult, 'agent' | 'model'>): Omit<AgentResult, 'agent' | 'model'> {
@@ -42,10 +42,9 @@ function normalizeAgent(parsed: Omit<AgentResult, 'agent' | 'model'>): Omit<Agen
 
 async function runAgent(agent: typeof AGENTS[number], symbol: string, market: unknown): Promise<AgentResult> {
   try {
-    const configuredModel = process.env[`OPENROUTER_MODEL_${agent.name}`] || process.env.OPENROUTER_MODEL;
-    const model = process.env.OPENROUTER_ALLOW_PAID === 'true' && configuredModel ? configuredModel : 'openrouter/free';
-    const result = await callOpenRouter([
-      { role: 'system', content: 'Você é um analista quantitativo disciplinado. Seja objetivo e conservador.' },
+    const model = process.env[`GROQ_MODEL_${agent.name}`] || process.env.GROQ_MODEL || 'openai/gpt-oss-20b';
+    const result = await callGroq([
+      { role: 'system', content: 'Você é um analista quantitativo disciplinado. Seja objetivo, conservador e baseado somente nos dados fornecidos.' },
       { role: 'user', content: promptFor(agent, symbol, market) },
     ], {
       model,
@@ -69,8 +68,7 @@ async function runAgent(agent: typeof AGENTS[number], symbol: string, market: un
 }
 
 async function runAgentsWithLimit(symbol: string, market: unknown): Promise<AgentResult[]> {
-  // O plano gratuito pode rejeitar várias requisições simultâneas por orçamento in-flight.
-  // Duas chamadas por vez preservam o comitê de 4 especialistas sem o pico de concorrência anterior.
+  // Duas chamadas simultâneas evitam picos desnecessários e deixam margem no plano gratuito.
   const results: AgentResult[] = [];
   for (let i = 0; i < AGENTS.length; i += 2) {
     const batch = AGENTS.slice(i, i + 2);
@@ -117,7 +115,6 @@ function masterScore(results: AgentResult[], market: any) {
   const score = Math.round(Math.max(-100, Math.min(100, rawMaster)));
   const decision: Decision = score >= 35 ? 'LONG' : score <= -35 ? 'SHORT' : 'NEUTRO';
   const aligned = valid.filter(r => r.decision === decision).length;
-  // Com menos de 3 agentes válidos não existe consenso estatisticamente útil.
   const agreement = valid.length >= 3 ? Math.round((aligned / valid.length) * 100) : 0;
 
   const quality = valid.length < 3 ? 'DADOS_INSUFICIENTES' : Math.abs(score) >= 70 && agreement >= 75 ? 'A+' : Math.abs(score) >= 50 && agreement >= 60 ? 'A' : Math.abs(score) >= 35 && agreement >= 50 ? 'B' : 'C';
@@ -147,13 +144,14 @@ export async function POST(req: Request) {
       symbol,
       timestamp: Date.now(),
       mode: 'AI_ANALYSIS_ONLY',
+      provider: 'GROQ',
       agents: results,
       supervisor: {
         ...master,
         agentsUsed: results.filter(r => !r.error && r.confidence > 0).length,
         status: master.quality === 'DADOS_INSUFICIENTES' ? 'DADOS_INSUFICIENTES' : 'CONFLUENCIA_MESTRE',
         executionAllowed: false,
-        note: 'Plano gratuito: OpenRouter Free Models Router, no máximo duas chamadas simultâneas. Score Mestre é analítico; Risk Engine e execução continuam separados e bloqueados.',
+        note: 'Groq Free + Structured Outputs. Score Mestre é analítico; Risk Engine e execução continuam separados e bloqueados.',
       },
     }), { headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
   } catch (error) {
