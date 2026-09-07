@@ -59,28 +59,13 @@ const makeSignal = (coin: Coin) => {
   const fired = Math.abs(change24h) > 4;
 
   return {
-    id: coin.id,
-    symbol: `${coin.symbol.toUpperCase()}/USDT`,
-    name: coin.name,
-    marketCapRank: coin.market_cap_rank,
-    marketCap: coin.market_cap,
-    currentPrice: price,
-    change24h,
-    change7d,
-    sparkline7d: prices,
-    volume24h: coin.total_volume,
-    timestamp: Date.now(),
-    timeStr: new Date().toLocaleTimeString('pt-BR'),
-    decision,
-    confidence,
-    riskReward: 3,
-    entryPrice: price,
-    stopLoss: stop,
-    takeProfit1: price + direction * 2 * risk,
-    takeProfit2: price + direction * 3 * risk,
-    takeProfit3: price + direction * 4 * risk,
-    breakevenTrigger: price + direction * risk,
-    atrValue: atr,
+    id: coin.id, symbol: `${coin.symbol.toUpperCase()}/USDT`, name: coin.name,
+    marketCapRank: coin.market_cap_rank, marketCap: coin.market_cap, currentPrice: price,
+    change24h, change7d, sparkline7d: prices, volume24h: coin.total_volume,
+    timestamp: Date.now(), timeStr: new Date().toLocaleTimeString('pt-BR'), decision,
+    confidence, riskReward: 3, entryPrice: price, stopLoss: stop,
+    takeProfit1: price + direction * 2 * risk, takeProfit2: price + direction * 3 * risk,
+    takeProfit3: price + direction * 4 * risk, breakevenTrigger: price + direction * risk, atrValue: atr,
     tripleScreen: {
       htf: { timeframe: '1D (Diário)', trend: trendBull ? 'ALTA (BULLISH)' : trendBear ? 'BAIXA (BEARISH)' : 'LATERAL', ema50: e50, ema200: ema(prices, 200), description: 'Tendência estimada pelas médias exponenciais do histórico disponível.', candles: [] },
       mtf: { timeframe: '1H (1 Hora)', pattern: fired ? 'Rompimento / expansão' : squeeze ? 'Compressão' : 'Consolidação', ema50: e50, dynamicSupportResistance: trendBull ? 'Suporte na EMA 50' : trendBear ? 'Resistência na EMA 50' : 'Rompida', candles: [] },
@@ -94,9 +79,7 @@ const makeSignal = (coin: Coin) => {
       confluenceAverage: confidence
     },
     aiThesis: { summary: 'Triagem quantitativa serverless usando tendência, RSI, momentum e compressão.', institutionalContext: 'Contexto institucional será enriquecido com dados de fluxo e derivativos.', primaryCatalyst: fired ? 'Expansão de volatilidade' : squeeze ? 'Compressão com potencial de expansão' : 'Continuação do momentum', riskWarning: 'Sinal algorítmico. Confirme estrutura, liquidez e risco antes de operar.', verdict: confidence >= 75 ? 'EXECUTAR' : 'AGUARDAR', source: 'Agente Quantitativo Local' },
-    passedFilter: confidence >= 75,
-    timeframe: '15m',
-    style: 'SCALP',
+    passedFilter: confidence >= 75, timeframe: '15m', style: 'SCALP',
     squeezeBreakout: { isSqueezeOn: squeeze, isSqueezeFired: fired, squeezeBarsCount: squeeze ? 5 : 0, state: fired ? 'IGNICAO_DISPARADA' : squeeze ? 'SQUEEZE_ATIVO' : 'NORMAL', stateLabel: fired ? 'Ignição disparada' : squeeze ? 'Compressão ativa' : 'Normal', explosionScore: Math.min(99, Math.round(40 + Math.abs(change24h) * 10)), urgency: Math.abs(change24h) > 6 ? 'CRITICA' : Math.abs(change24h) > 4 ? 'ALTA' : Math.abs(change24h) > 2 ? 'MODERADA' : 'BAIXA', bollingerBandWidth: Math.abs(change24h), keltnerWidth: Math.abs(change24h) * 1.4, compressionPercent: Math.max(0, 100 - Math.abs(change24h) * 10), momentumDirection: long ? 'ALTA' : short ? 'BAIXA' : 'NEUTRO', shortSqueezeRisk: Math.abs(change24h) > 5 ? 'ALTO' : 'MODERADO', estimatedTarget8Pct: price * 1.082, estimatedTarget15Pct: price * 1.154, recommendedStopLoss: stop, catalysts: ['Momentum', 'Volatilidade'] }
   };
 };
@@ -105,7 +88,7 @@ export default async function handler(req: Request) {
   if (req.method !== 'GET') return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405, headers: { 'content-type': 'application/json' } });
   try {
     const url = 'https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=100&page=1&sparkline=true&price_change_percentage=7d';
-    const response = await fetch(url, { headers: { accept: 'application/json' } });
+    const response = await fetch(url, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(15000) });
     if (!response.ok) throw new Error(`CoinGecko ${response.status}`);
     const coins = (await response.json()) as Coin[];
     return new Response(JSON.stringify(coins.map(makeSignal)), { headers: { 'content-type': 'application/json', 'cache-control': 's-maxage=30, stale-while-revalidate=60' } });
