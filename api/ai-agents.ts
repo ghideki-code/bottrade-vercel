@@ -1,4 +1,4 @@
-import { callOpenRouter, parseJson } from './_lib/openrouter';
+import { callOpenRouter, parseJson } from './_lib/openrouter.js';
 
 type AgentName = 'TECHNICAL' | 'SMC' | 'WYCKOFF_GANN' | 'DIVERGENCE';
 type Decision = 'LONG' | 'SHORT' | 'NEUTRO';
@@ -23,21 +23,7 @@ const AGENTS: Array<{ name: AgentName; mission: string }> = [
 ];
 
 function promptFor(agent: typeof AGENTS[number], symbol: string, market: unknown) {
-  return `Você é o agente ${agent.name} do BotTrade. Sua missão: ${agent.mission}
-
-Ativo: ${symbol}
-Dados objetivos disponíveis:
-${JSON.stringify(market)}
-
-Regras:
-- Não invente dados, preços, notícias ou indicadores ausentes.
-- Não execute ordens e não forneça instruções de alavancagem.
-- Trabalhe apenas como analista de mercado.
-- Retorne SOMENTE JSON válido.
-- confidence deve ser número de 0 a 100.
-
-Formato:
-{"decision":"LONG|SHORT|NEUTRO","confidence":0,"thesis":"","keyLevels":[""],"invalidation":"","riskFlags":[""]}`;
+  return `Você é o agente ${agent.name} do BotTrade. Sua missão: ${agent.mission}\n\nAtivo: ${symbol}\nDados objetivos disponíveis:\n${JSON.stringify(market)}\n\nRegras:\n- Não invente dados, preços, notícias ou indicadores ausentes.\n- Não execute ordens e não forneça instruções de alavancagem.\n- Trabalhe apenas como analista de mercado.\n- Retorne SOMENTE JSON válido.\n- confidence deve ser número de 0 a 100.\n\nFormato:\n{"decision":"LONG|SHORT|NEUTRO","confidence":0,"thesis":"","keyLevels":[""],"invalidation":"","riskFlags":[""]}`;
 }
 
 function normalizeAgent(parsed: Omit<AgentResult, 'agent' | 'model'>): Omit<AgentResult, 'agent' | 'model'> {
