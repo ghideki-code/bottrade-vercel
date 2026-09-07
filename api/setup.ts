@@ -1,5 +1,5 @@
-import { analyzeSMC } from '../src/utils/smcAnalysis';
-import type { Candle } from '../src/types';
+import { analyzeSMC } from '../src/utils/smcAnalysis.js';
+import type { Candle } from '../src/types.js';
 
 type Setup = {
   symbol: string; interval: string; direction: 'LONG' | 'SHORT' | 'WAIT'; score: number;
@@ -8,10 +8,10 @@ type Setup = {
 };
 
 async function candles(symbol: string, interval: string): Promise<Candle[]> {
-  const r = await fetch(`https://fapi.binance.com/fapi/v1/klines?symbol=${encodeURIComponent(symbol)}&interval=${interval}&limit=200`);
+  const r = await fetch(`https://fapi.binance.com/fapi/v1/klines?symbol=${encodeURIComponent(symbol)}&interval=${interval}&limit=200`, {signal: AbortSignal.timeout(12000)});
   if (!r.ok) throw new Error(`Binance ${r.status}`);
   const rows = await r.json() as Array<[number,string,string,string,string,string]>;
-  return rows.map(x => ({ timestamp:x[0], open:+x[1], high:+x[2], low:+x[3], close:+x[4], volume:+x[5] }));
+  return rows.map(x => ({ timestamp:x[0], timeStr:new Date(x[0]).toISOString(), open:+x[1], high:+x[2], low:+x[3], close:+x[4], volume:+x[5] }));
 }
 
 function detect(symbol:string, c:Candle[], h:Candle[]): Setup {
@@ -44,7 +44,7 @@ function detect(symbol:string, c:Candle[], h:Candle[]): Setup {
 
 export default async function handler(req: Request){
   try{
-    const u=new URL(req.url); const symbol=String(u.searchParams.get('symbol')||'BTCUSDT').toUpperCase().replace('/','');
+    const u=new URL(req.url, 'https://bottrade-vercel.local'); const symbol=String(u.searchParams.get('symbol')||'BTCUSDT').toUpperCase().replace('/','');
     const [c,h]=await Promise.all([candles(symbol,'15m'),candles(symbol,'4h')]);
     return new Response(JSON.stringify({setup:detect(symbol,c,h),source:'Binance USDⓈ-M Futures • Setup Engine'}),{headers:{'content-type':'application/json','cache-control':'s-maxage=15, stale-while-revalidate=45'}});
   }catch(e){return new Response(JSON.stringify({error:e instanceof Error?e.message:'Setup unavailable'}),{status:502,headers:{'content-type':'application/json'}});}
