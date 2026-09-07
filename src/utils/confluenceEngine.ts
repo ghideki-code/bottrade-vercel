@@ -1,5 +1,5 @@
-import type { Candle } from '../types';
-import { analyzeSMC } from './smcAnalysis';
+import type { Candle } from '../types.js';
+import { analyzeSMC } from './smcAnalysis.js';
 
 export type WyckoffPhase = 'ACCUMULATION'|'MARKUP'|'DISTRIBUTION'|'MARKDOWN'|'RANGE';
 export interface ConfluenceAnalysis {
