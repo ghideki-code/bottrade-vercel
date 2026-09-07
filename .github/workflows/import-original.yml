@@ -1,0 +1,36 @@
+name: Import original project
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout target repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Copy original repository
+        run: |
+          rm -rf /tmp/bottrader
+          git clone --depth 1 https://github.com/ghideki-code/bottrader.git /tmp/bottrader
+          find /tmp/bottrader -mindepth 1 -maxdepth 1 ! -name .git -exec cp -a {} . \;
+
+      - name: Commit imported project
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes to import."
+          else
+            git commit -m "chore: import complete bottrader source"
+            git push origin HEAD:main
+          fi
