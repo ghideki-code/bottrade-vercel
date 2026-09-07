@@ -20,9 +20,11 @@ jobs:
           fetch-depth: 0
 
       - name: Copy original repository
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           rm -rf /tmp/bottrader
-          git clone --depth 1 https://github.com/ghideki-code/bottrader.git /tmp/bottrader
+          git clone --depth 1 https://x-access-token:${GH_TOKEN}@github.com/ghideki-code/bottrader.git /tmp/bottrader
           find /tmp/bottrader -mindepth 1 -maxdepth 1 ! -name .git -exec cp -a {} . \;
 
       - name: Commit imported project
