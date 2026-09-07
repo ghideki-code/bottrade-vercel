@@ -1,0 +1,6 @@
+{
+  "name": "The God Protocol v2026",
+  "description": "Terminal quantitativo híbrido multi-timeframe com confluência de 4 escolas de trading, IA institucional, backtesting diário e alertas críticos.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
